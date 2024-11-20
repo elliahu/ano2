@@ -1,23 +1,33 @@
 # main.py
 import sys
 import cv2
+import csv
 import numpy as np
 import glob
+import argparse
 from utils import four_point_transform, extract_haar_feature_image
 from nn import load_training_data, load_classifier, train_classifier
 from edge_classifier import get_number_of_edge_pixels
 from parking_model import classify_image_with_pytorch, ParkingSpaceClassifier
 from load_model import load_pytorch_model
 from googlenet_model import GoogLeNetSmall, classify_image_with_googlenet
+from resnet_model import ResNet18, classify_image_with_resnet18
 
 def main(argv):
-    # Allow user to select classification method
-    if len(argv) > 0 and argv[0] in ('edge', 'haar', 'pytorch', 'googlenet'):
-        method = argv[0]
-    else:
-        print("Usage: main.py <classification_method>")
-        print("classification_method options: 'edge', 'haar', 'pytorch', 'googlenet")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(description="Parking Space Classification Tool")
+    parser.add_argument("model", choices=["edge", "haar", "pytorch", "googlenet", "resnet"],
+                    help="Classification model to use")
+    parser.add_argument("--summary", help="Print only summary", action="store_true")
+    args = parser.parse_args()
+
+    # create results csv file
+    results_csv = f"results/results-{args.model}.csv"
+    results_csv_header = ["image", "success_rate"]
+
+    # Write header and rows to the CSV file
+    with open(results_csv, mode="w", newline="") as file:
+        writer = csv.writer(file)
+        writer.writerow(results_csv_header)  # Write the header
 
     # Read parking space coordinates from file
     try:
@@ -34,55 +44,101 @@ def main(argv):
         if len(coord) == 8:
             pkm_coordinates.append(coord)
 
-    # Load classifier if using Haar or PyTorch model
-    if method == 'haar':
+    # Load classifier 
+    if args.model == 'haar':
         model_path = 'models/random_forest_model.pkl'
         clf = load_classifier(model_path)
         if clf is None:
             X, y = load_training_data()
             clf = train_classifier(X, y, model_path=model_path)
-    elif method == 'pytorch':
+    elif args.model == 'pytorch':
         pytorch_model = load_pytorch_model(ParkingSpaceClassifier(), 'models/parking_space_cnn.pth')
-    elif method == 'googlenet':
+    elif args.model == 'googlenet':
         googlenet_model = load_pytorch_model(GoogLeNetSmall(), 'models/googlenet_model.pth')
+    elif args.model == 'resnet':
+        resnet_model = load_pytorch_model(ResNet18(), 'models/resnet18_model.pth');
 
     # Load and process each test image
     test_images = glob.glob("test_images/*.jpg") + glob.glob("test_images/*.png")
     test_images.sort()
-    for img_name in test_images:
+    test_labels = sorted(glob.glob("test_images/*.txt"))
+
+    # For each parking lot image
+    for img_idx, img_name in enumerate(test_images):
         image = cv2.imread(img_name)
+
         if image is None:
             print(f"Failed to load image {img_name}")
             continue
 
+        # Read corresponding label file
+        label_file = test_labels[img_idx]
+        try:
+            with open(label_file, 'r') as lf:
+                true_labels = [int(line.strip()) for line in lf.readlines()]
+        except FileNotFoundError:
+            print(f"Label file {label_file} not found. Skipping image {img_name}.")
+            continue
+
+        if len(true_labels) != len(pkm_coordinates):
+            print(f"Mismatch in number of labels and parking coordinates for {img_name}. Skipping.")
+            continue
+
         annotated_image = image.copy()
-        for coord in pkm_coordinates:
-            points = [(coord[i], coord[i+1]) for i in range(0, 8, 2)]
+        correct_predictions = 0
+        total_predictions = len(pkm_coordinates)
+
+        # For each parking spot image extracted from the parking lot image
+        for idx, coord in enumerate(pkm_coordinates):
+            points = [(coord[i], coord[i + 1]) for i in range(0, 8, 2)]
             one_place_img = four_point_transform(image, points)
 
-            if method == 'edge':
+            if args.model == 'edge':
                 edge_count = get_number_of_edge_pixels(one_place_img)
                 is_occupied = edge_count >= 500  # threshold
-            elif method == 'haar':
+            elif args.model == 'haar':
                 features = extract_haar_feature_image(cv2.cvtColor(one_place_img, cv2.COLOR_BGR2GRAY))
-                if features:
-                    is_occupied = clf.predict([features])[0] == 1
-                else:
-                    is_occupied = False
-            elif method == 'pytorch':
+                is_occupied = clf.predict([features])[0] == 1 if features else False
+            elif args.model == 'pytorch':
                 is_occupied = classify_image_with_pytorch(pytorch_model, one_place_img)
-            elif method == 'googlenet':
+            elif args.model == 'googlenet':
                 is_occupied = classify_image_with_googlenet(googlenet_model, one_place_img)
-            
+            elif args.model == 'resnet':
+                is_occupied = classify_image_with_resnet18(resnet_model, one_place_img)
 
-            # Annotate the image based on the result
-            color = (0, 0, 255) if is_occupied else (0, 255, 0)
+            # Compare prediction with ground truth
+            true_label = true_labels[idx]
+            is_correct = (is_occupied == (true_label == 1))
+
+            # Annotate the parking spot
+            if is_correct:
+                color = (0, 0, 255) if is_occupied else (0, 255, 0)  # Red for full, Green for free
+                correct_predictions += 1
+            else:
+                color = (255, 0, 255)  # Purple for incorrect prediction
+
             cv2.polylines(annotated_image, [np.array(points, np.int32).reshape((-1, 1, 2))], True, color, 2)
+            if not is_correct:
+                text = "Incorrect"
+                cv2.putText(annotated_image, text, (points[0][0], points[0][1] - 10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 255), 1)
+
+
+        # Calculate and annotate success rate
+        success_rate = (correct_predictions / total_predictions) * 100
+        cv2.putText(annotated_image, f"Success Rate: {success_rate:.2f}%",
+                    (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+        print(f"{args.model} model on image {img_name} had success rate: {success_rate:.2f}%")
+        with open(results_csv, mode="a", newline="") as file:
+            writer = csv.writer(file)
+            writer.writerow([img_name, success_rate])  # Write the header
+
 
         # Show the annotated image
-        cv2.imshow("Annotated Parking Lot", annotated_image)
-        if cv2.waitKey(0) & 0xFF == 27:  # Escape key
-            break
+        if(not args.summary):
+            cv2.imshow("Annotated Parking Lot", annotated_image)
+            if cv2.waitKey(0) & 0xFF == 27:  # Escape key
+                break
 
     cv2.destroyAllWindows()
 
