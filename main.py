@@ -62,6 +62,7 @@ def main(argv):
     test_images = glob.glob("test_images/*.jpg") + glob.glob("test_images/*.png")
     test_images.sort()
     test_labels = sorted(glob.glob("test_images/*.txt"))
+    rates_sum = 0
 
     # For each parking lot image
     for img_idx, img_name in enumerate(test_images):
@@ -129,6 +130,7 @@ def main(argv):
         cv2.putText(annotated_image, f"Success Rate: {success_rate:.2f}%",
                     (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
         print(f"{args.model} model on image {img_name} had success rate: {success_rate:.2f}%")
+        rates_sum += success_rate
         with open(results_csv, mode="a", newline="") as file:
             writer = csv.writer(file)
             writer.writerow([img_name, success_rate])  # Write the header
@@ -141,6 +143,7 @@ def main(argv):
                 break
 
     cv2.destroyAllWindows()
+    print(f"Average success rate: {rates_sum / len(test_images)}")
 
 if __name__ == "__main__":
     main(sys.argv[1:])
