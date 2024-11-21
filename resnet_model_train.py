@@ -28,11 +28,12 @@ def train_model(model, dataloader, criterion, optimizer, num_epochs=10):
 
 # Initialize model, criterion, and optimizer
 model = ResNet18()
+num_epochs = 15
 criterion = nn.CrossEntropyLoss()
-optimizer = optim.Adam(model.parameters(), lr=0.001)
+optimizer = optim.Adam(model.parameters(), lr=0.0001)
 
 # Train and save the model
 print("Starting training...")
-train_model(model, train.dataloader, criterion, optimizer)
+train_model(model, train.dataloader, criterion, optimizer, num_epochs)
 torch.save(model.state_dict(), 'models/resnet18_model.pth')
 print(f"Model training complete. Saved to models/resnet18_model.pth")

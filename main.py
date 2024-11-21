@@ -5,20 +5,28 @@ import csv
 import numpy as np
 import glob
 import argparse
-from utils import four_point_transform, extract_haar_feature_image
+import torch
+from yolo import YoloModel
+from utilities import four_point_transform, extract_haar_feature_image
 from nn import load_training_data, load_classifier, train_classifier
 from edge_classifier import get_number_of_edge_pixels
 from parking_model import classify_image_with_pytorch, ParkingSpaceClassifier
 from load_model import load_pytorch_model
 from googlenet_model import GoogLeNetSmall, classify_image_with_googlenet
 from resnet_model import ResNet18, classify_image_with_resnet18
+from shapely.geometry import Polygon
+
+accepted_classes = ['car', 'truck', 'bus', 'bicycle', 'motorcycle', 'boat' ]
+
 
 def main(argv):
     parser = argparse.ArgumentParser(description="Parking Space Classification Tool")
     parser.add_argument("model", choices=["edge", "haar", "pytorch", "googlenet", "resnet"],
                     help="Classification model to use")
+    parser.add_argument("--segment", help="Use segmentation and object detection to help classification", action="store_true")
     parser.add_argument("--summary", help="Print only summary", action="store_true")
     args = parser.parse_args()
+    
 
     # create results csv file
     results_csv = f"results/results-{args.model}.csv"
@@ -58,6 +66,10 @@ def main(argv):
     elif args.model == 'resnet':
         resnet_model = load_pytorch_model(ResNet18(), 'models/resnet18_model.pth');
 
+    if args.segment:
+        yolo = YoloModel()
+        yolo.load_model()
+
     # Load and process each test image
     test_images = glob.glob("test_images/*.jpg") + glob.glob("test_images/*.png")
     test_images.sort()
@@ -89,10 +101,29 @@ def main(argv):
         correct_predictions = 0
         total_predictions = len(pkm_coordinates)
 
+        if args.segment:
+            yolo.process_image(image)
+            yolo_predictions = yolo.get_top_predictions()
+
         # For each parking spot image extracted from the parking lot image
         for idx, coord in enumerate(pkm_coordinates):
             points = [(coord[i], coord[i + 1]) for i in range(0, 8, 2)]
             one_place_img = four_point_transform(image, points)
+            parking_polygon = Polygon(points)
+
+            # Filter YOLO predictions based on IoU
+            overlapping_predictions = []
+            for p in yolo_predictions:
+                bbox = p['bounding_box']  # [x_min, y_min, x_max, y_max]
+                x_min, y_min, x_max, y_max = map(int, bbox)
+                bbox_polygon = Polygon([(x_min, y_min), (x_max, y_min), (x_max, y_max), (x_min, y_max)])
+
+                if bbox_polygon.intersects(parking_polygon):
+                    intersection_area = bbox_polygon.intersection(parking_polygon).area
+                    union_area = bbox_polygon.union(parking_polygon).area
+                    iou = intersection_area / union_area
+                    if iou > 0.1:  # Significant overlap threshold
+                        overlapping_predictions.append((p, iou))
 
             if args.model == 'edge':
                 edge_count = get_number_of_edge_pixels(one_place_img)
@@ -106,6 +137,27 @@ def main(argv):
                 is_occupied = classify_image_with_googlenet(googlenet_model, one_place_img)
             elif args.model == 'resnet':
                 is_occupied = classify_image_with_resnet18(resnet_model, one_place_img)
+            
+             # Select the prediction with the highest confidence
+            if overlapping_predictions:
+                best_prediction, best_iou = max(overlapping_predictions, key=lambda x: x[0]['confidence'])
+
+                # Draw the best prediction
+                bbox = best_prediction['bounding_box']
+                x_min, y_min, x_max, y_max = map(int, bbox)
+                cv2.rectangle(annotated_image, (x_min, y_min), (x_max, y_max), (255, 255, 255), 2)
+                label = f"{best_prediction['class_name']} {best_prediction['confidence']:.2f}, IoU: {best_iou:.2f}"
+                cv2.putText(annotated_image, label, (x_min, y_min - 10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+
+                # Update `is_occupied` based on the best prediction's IoU
+                iou = max([iou for _, iou in overlapping_predictions])
+                if iou > 0.3 and is_occupied == 0:
+                    is_occupied = 1
+                elif iou < 0.1 and is_occupied == 1:
+                    is_occupied = 0
+
+                # 0.3 0.1
 
             # Compare prediction with ground truth
             true_label = true_labels[idx]
@@ -120,10 +172,9 @@ def main(argv):
 
             cv2.polylines(annotated_image, [np.array(points, np.int32).reshape((-1, 1, 2))], True, color, 2)
             if not is_correct:
-                text = "Incorrect"
+                text = "Incorrect full" if is_occupied == 1 else "Incorrect free"
                 cv2.putText(annotated_image, text, (points[0][0], points[0][1] - 10),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 255), 1)
-
 
         # Calculate and annotate success rate
         success_rate = (correct_predictions / total_predictions) * 100

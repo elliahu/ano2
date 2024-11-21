@@ -1,7 +1,7 @@
 import cv2
 import glob
 import os
-from utils import extract_haar_feature_image
+from utilities import extract_haar_feature_image
 from sklearn.ensemble import RandomForestClassifier
 import joblib  # For saving and loading the trained model
 

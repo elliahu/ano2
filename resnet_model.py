@@ -66,7 +66,7 @@ class ResNet(nn.Module):
         return out
 
 # Instantiate a ResNet-18 (2 blocks per layer)
-def ResNet18(num_classes=10):
+def ResNet18(num_classes=2):
     return ResNet(ResidualBlock, [2, 2, 2, 2], num_classes)
 
 def classify_image_with_resnet18(model, image):

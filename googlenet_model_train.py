@@ -7,11 +7,13 @@ import torch
 
 # Initialize model, criterion, and optimizer
 model = GoogLeNetSmall()
+num_epochs = 10
 criterion = nn.CrossEntropyLoss()
-optimizer = optim.Adam(model.parameters(), lr=0.001)
+optimizer = optim.Adam(model.parameters(), lr=0.00001)
+
 
 # Train and save the model
 print("Starting training...")
-train.train_model(model, train.dataloader, criterion, optimizer)
+train.train_model(model, train.dataloader, criterion, optimizer, num_epochs)
 torch.save(model.state_dict(), 'models/googlenet_model.pth')
 print(f"Model training complete. Saved to models/googlenet_model.pth")
