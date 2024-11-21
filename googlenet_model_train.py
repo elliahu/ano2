@@ -14,6 +14,6 @@ optimizer = optim.Adam(model.parameters(), lr=0.00001)
 
 # Train and save the model
 print("Starting training...")
-train.train_model(model, train.dataloader, criterion, optimizer, num_epochs)
-torch.save(model.state_dict(), 'models/googlenet_model.pth')
-print(f"Model training complete. Saved to models/googlenet_model.pth")
+train.train_model(model, train.augmented_dataloader, criterion, optimizer, num_epochs)
+torch.save(model.state_dict(), 'models/googlenet_model_aug.pth')
+print(f"Model training complete. Saved to models/googlenet_model_aug.pth")

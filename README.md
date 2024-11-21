@@ -81,6 +81,10 @@ optimizer = optim.Adam(model.parameters(), lr=0.00001)
 ```
 Average success rate: 98.88392857142857
 
+Success rate after adding segmentation: 98.88392857142857
+
+Success rate with augmented dataset using GAN 90.84821428571428
+
 
 ## ResNet18
 ![resnet18_model.pth.png](models/resnet18_model.pth.png)

@@ -9,7 +9,7 @@ class YoloModel():
         self.model = YOLO("yolo11l.pt")
 
     def process_image(self, image):
-        self.results = self.model(image)
+        self.results = self.model(image , verbose=False)
 
     def get_prediction(self, index):
         """

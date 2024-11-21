@@ -21,7 +21,7 @@ accepted_classes = ['car', 'truck', 'bus', 'bicycle', 'motorcycle', 'boat' ]
 
 def main(argv):
     parser = argparse.ArgumentParser(description="Parking Space Classification Tool")
-    parser.add_argument("model", choices=["edge", "haar", "pytorch", "googlenet", "resnet"],
+    parser.add_argument("model", choices=["edge", "haar", "pytorch", "googlenet", "googlenet_aug", "resnet"],
                     help="Classification model to use")
     parser.add_argument("--segment", help="Use segmentation and object detection to help classification", action="store_true")
     parser.add_argument("--summary", help="Print only summary", action="store_true")
@@ -63,6 +63,8 @@ def main(argv):
         pytorch_model = load_pytorch_model(ParkingSpaceClassifier(), 'models/parking_space_cnn.pth')
     elif args.model == 'googlenet':
         googlenet_model = load_pytorch_model(GoogLeNetSmall(), 'models/googlenet_model.pth')
+    elif args.model == 'googlenet_aug':
+        googlenet_model_aug = load_pytorch_model(GoogLeNetSmall(), 'models/googlenet_model_aug.pth')
     elif args.model == 'resnet':
         resnet_model = load_pytorch_model(ResNet18(), 'models/resnet18_model.pth');
 
@@ -113,17 +115,18 @@ def main(argv):
 
             # Filter YOLO predictions based on IoU
             overlapping_predictions = []
-            for p in yolo_predictions:
-                bbox = p['bounding_box']  # [x_min, y_min, x_max, y_max]
-                x_min, y_min, x_max, y_max = map(int, bbox)
-                bbox_polygon = Polygon([(x_min, y_min), (x_max, y_min), (x_max, y_max), (x_min, y_max)])
+            if args.segment:
+                for p in yolo_predictions:
+                    bbox = p['bounding_box']  # [x_min, y_min, x_max, y_max]
+                    x_min, y_min, x_max, y_max = map(int, bbox)
+                    bbox_polygon = Polygon([(x_min, y_min), (x_max, y_min), (x_max, y_max), (x_min, y_max)])
 
-                if bbox_polygon.intersects(parking_polygon):
-                    intersection_area = bbox_polygon.intersection(parking_polygon).area
-                    union_area = bbox_polygon.union(parking_polygon).area
-                    iou = intersection_area / union_area
-                    if iou > 0.1:  # Significant overlap threshold
-                        overlapping_predictions.append((p, iou))
+                    if bbox_polygon.intersects(parking_polygon):
+                        intersection_area = bbox_polygon.intersection(parking_polygon).area
+                        union_area = bbox_polygon.union(parking_polygon).area
+                        iou = intersection_area / union_area
+                        if iou > 0.1:  # Significant overlap threshold
+                            overlapping_predictions.append((p, iou))
 
             if args.model == 'edge':
                 edge_count = get_number_of_edge_pixels(one_place_img)
@@ -135,11 +138,13 @@ def main(argv):
                 is_occupied = classify_image_with_pytorch(pytorch_model, one_place_img)
             elif args.model == 'googlenet':
                 is_occupied = classify_image_with_googlenet(googlenet_model, one_place_img)
+            elif args.model == 'googlenet_aug':
+                is_occupied = classify_image_with_googlenet(googlenet_model_aug, one_place_img)
             elif args.model == 'resnet':
                 is_occupied = classify_image_with_resnet18(resnet_model, one_place_img)
             
              # Select the prediction with the highest confidence
-            if overlapping_predictions:
+            if overlapping_predictions and args.segment:
                 best_prediction, best_iou = max(overlapping_predictions, key=lambda x: x[0]['confidence'])
 
                 # Draw the best prediction
@@ -157,8 +162,13 @@ def main(argv):
                 elif iou < 0.1 and is_occupied == 1:
                     is_occupied = 0
 
-                # 0.3 0.1
-
+               
+            pixels = get_number_of_edge_pixels(one_place_img)
+            if is_occupied == 1 and pixels < 50:
+                is_occupied = 0
+            if is_occupied == 0 and pixels > 800:
+                is_occupied = 1
+            
             # Compare prediction with ground truth
             true_label = true_labels[idx]
             is_correct = (is_occupied == (true_label == 1))
@@ -169,6 +179,9 @@ def main(argv):
                 correct_predictions += 1
             else:
                 color = (255, 0, 255)  # Purple for incorrect prediction
+                cv2.putText(annotated_image, f"{pixels}", (x_min, y_min - 50),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 255), 1)
+
 
             cv2.polylines(annotated_image, [np.array(points, np.int32).reshape((-1, 1, 2))], True, color, 2)
             if not is_correct:
