@@ -1,9 +1,10 @@
 import torch
 import torch.nn as nn
-import torch.optim as optim
+from torchvision import datasets
+from torch.utils.data import DataLoader
 import torch.nn.functional as F
 from torchvision import transforms
-import train_model as train
+from torchvision.transforms import ToTensor
 
 class ParkingSpaceClassifier(nn.Module):
     def __init__(self):
@@ -24,6 +25,34 @@ class ParkingSpaceClassifier(nn.Module):
         x = self.fc2(x)
         return x
 
+class ParkingSpaceModelS(nn.Module):
+    def __init__(self):
+        super(ParkingSpaceModelS, self).__init__()
+        self.fc1 = nn.Linear(32 * 32 * 3, 128)
+        self.fc2 = nn.Linear(128, 2)
+
+    def forward(self, x):
+        x = x.view(-1, 32 * 32 * 3)
+        x = torch.relu(self.fc1(x))
+        x = self.fc2(x)
+        return x
+
+class ParkingSpaceModelM(nn.Module):
+    def __init__(self):
+        super(ParkingSpaceModelM, self).__init__()
+        self.fc1 = nn.Linear(32 * 32 * 3, 128)
+        self.fc2 = nn.Linear(128, 256)
+        self.fc3 = nn.Linear(256, 2)
+
+    def forward(self, x):
+        x = x.view(-1, 32 * 32 * 3)
+        x = torch.relu(self.fc1(x))
+        x = torch.relu(self.fc2(x))
+        x = self.fc3(x)
+        return x
+
+
+
 def classify_image_with_pytorch(model, image):
     # Preprocess the image for the model
     preprocess = transforms.Compose([
@@ -37,14 +66,36 @@ def classify_image_with_pytorch(model, image):
         _, predicted = torch.max(output, 1)
     return predicted.item() == 1  # Returns True if occupied
 
-def _train():
-    # Initialize model, criterion, and optimizer
-    model = ParkingSpaceClassifier()
-    criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=0.001)
+def _train(model, criterion, optimizer, model_path, epochs=10, batch_size=32):
+    # Prepare the dataset
+    transform = transforms.Compose([
+        transforms.Resize((32, 32)),  # Ensure all images are 32x32
+        transforms.ToTensor()
+    ])
 
-    # Train and save the model
+    train_data = datasets.ImageFolder(
+        root="train_images",
+        transform=transform
+    )
+    train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True)
+
     print("Starting training...")
-    train.train_model(model, train.dataloader, criterion, optimizer)
-    torch.save(model.state_dict(), 'model/parking_space_cnn.pth')
-    print(f"Model training complete. Saved to model/parking_space_cnn.pth")
+
+    # Training loop
+    for epoch in range(epochs):
+        model.train()
+        running_loss = 0.0
+        for inputs, labels in train_loader:
+            optimizer.zero_grad()
+            outputs = model(inputs)
+            loss = criterion(outputs, labels)
+            loss.backward()
+            optimizer.step()
+            running_loss += loss.item()
+
+        # Log the epoch loss
+        print(f"Epoch {epoch + 1}/{epochs}, Loss: {running_loss / len(train_loader)}")
+
+    # Save the trained model
+    torch.save(model.state_dict(), model_path)
+    print(f"Model training complete. Saved to {model_path}")
