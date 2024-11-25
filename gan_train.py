@@ -6,10 +6,37 @@ from torchvision import transforms
 from torchvision.datasets import ImageFolder
 from gan import Generator, Discriminator
 import os
+import matplotlib.pyplot as plt
+import torchvision.utils as vutils
 
 # Paths to training data
 TRAIN_PATH = "train_images"
 MODEL_PATH = "models/gan_model.pth"
+
+# Directory to save generated images
+IMAGE_SAVE_PATH = "gan_images"
+os.makedirs(IMAGE_SAVE_PATH, exist_ok=True)
+
+
+# Function to save and display generated images
+def save_and_display_generated_images(generator, epoch, num_images=8, filename_prefix="epoch"):
+    generator.eval()
+    with torch.no_grad():
+        z = torch.randn(num_images, 100).to(device)
+        fake_images = generator(z).cpu()
+
+        # Denormalize images and create a grid
+        grid = vutils.make_grid(fake_images, nrow=4, normalize=True)
+
+        # Save image to disk
+        filename = f"{IMAGE_SAVE_PATH}/{filename_prefix}_{epoch + 1:03d}.png"
+        plt.figure(figsize=(8, 8))
+        plt.axis("off")
+        plt.title(f"Generated Images at Epoch {epoch + 1}")
+        plt.imshow(grid.permute(1, 2, 0))  # Convert to HWC for plt.imshow
+        plt.savefig(filename)
+        plt.close()
+        print(f"Saved generated images to {filename}")
 
 # Initialize the models
 generator = Generator()
@@ -103,6 +130,10 @@ def train_gan(generator, discriminator, dataloader, criterion, optimizer_g, opti
 
         print(f"Epoch {epoch+1}/{num_epochs}, Loss G: {epoch_loss_g:.4f}, Loss D: {epoch_loss_d:.4f}")
 
+        # Save generated images every 10 epochs
+        if (epoch + 1) % 10 == 0:
+            save_and_display_generated_images(generator, epoch)
+
         # Save model every few epochs
         if (epoch + 1) % 10 == 0:
             save_model(generator, discriminator, optimizer_g, optimizer_d, epoch)
@@ -118,4 +149,4 @@ discriminator = discriminator.to(device)
 os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
 
 # Start training
-train_gan(generator, discriminator, dataloader, criterion, optimizer_g, optimizer_d, num_epochs=100)
+train_gan(generator, discriminator, dataloader, criterion, optimizer_g, optimizer_d, num_epochs=1000)
