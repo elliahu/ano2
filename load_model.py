@@ -11,7 +11,7 @@ import os
 
 def load_pytorch_model(model, model_path='models/model.pth'):
     if not os.path.exists(model_path):
-        _train(model, nn.CrossEntropyLoss(), optim.Adam(model.parameters(), lr=0.001), model_path)
+        _train(model, nn.CrossEntropyLoss(), optim.Adam(model.parameters(), lr=0.001), model_path, 10)
     print(f"Model loaded from {model_path}")
     model.load_state_dict(torch.load(model_path))
     model.eval()
